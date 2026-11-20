@@ -8,16 +8,21 @@ venv/
 # Data & Outputs
 data/*
 !data/.gitkeep
+output/
+output_*/
 
-# IDE
-.vscode/
-.idea/
-
-# Heavy media & datasets
+# Heavy media & temporary files
 frames/
 test_frames/
 *.mp4
 *.avi
 global_map.png
-route_visualization.png
+route_visualization*.png
 mock_trajectory.json
+
+# IDE & OS
+.vscode/
+.idea/
+__MACOSX/
+.DS_Store
+Thumbs.db
