@@ -8,8 +8,6 @@ venv/
 # Data & Outputs
 data/*
 !data/.gitkeep
-output/*
-!output/.gitkeep
 
 # IDE
 .vscode/
