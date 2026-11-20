@@ -14,3 +14,12 @@ output/*
 # IDE
 .vscode/
 .idea/
+
+# Heavy media & datasets
+frames/
+test_frames/
+*.mp4
+*.avi
+global_map.png
+route_visualization.png
+mock_trajectory.json
