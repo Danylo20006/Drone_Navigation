@@ -84,6 +84,7 @@ def match_frame(
     map_gray = _preprocess(map_img, use_clahe=use_clahe)
     frame_gray = _preprocess(frame_img, use_clahe=use_clahe)
 
+    # Downscale drone frame to approximate the satellite map resolution
     if crop_scale != 1.0:
         interpolation = cv2.INTER_AREA if crop_scale < 1.0 else cv2.INTER_LINEAR
         frame_scaled = cv2.resize(
@@ -116,6 +117,7 @@ def match_frame(
         des_frame = np.asarray(des_frame, dtype=np.float32)
         des_map = np.asarray(des_map, dtype=np.float32)
 
+    # Filter matches using Lowe's ratio test
     knn_matches = matcher.knnMatch(des_frame, des_map, k=2)
     good_matches = [
         m
@@ -131,6 +133,7 @@ def match_frame(
     src_pts = np.float32([kp_frame[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
     dst_pts = np.float32([kp_map[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
 
+    # Estimate robust homography via MAGSAC/RANSAC
     H_scaled, mask = cv2.findHomography(
         src_pts,
         dst_pts,
@@ -144,6 +147,7 @@ def match_frame(
     if inliers < MIN_MATCH_COUNT:
         return None, 0
 
+    # Map homography back to the original unscaled frame coordinate space
     scale_matrix = np.diag([crop_scale, crop_scale, 1.0]).astype(np.float64)
     H_orig = H_scaled.astype(np.float64) @ scale_matrix
     return H_orig, inliers

@@ -21,53 +21,53 @@ def parse_args() -> argparse.Namespace:
         "--map",
         type=str,
         required=True,
-        help="data/global_map.png",
+        help="Path to the satellite map image (e.g., data/global_map.png).",
     )
     parser.add_argument(
         "--input",
         type=str,
         required=True,
-        help="data/frames",
+        help="Path to the directory of UAV frames or a video file (e.g., data/frames).",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
         default="output",
-        help="output",
+        help="Directory to save trajectory.json, route image, and zoomed video.",
     )
     parser.add_argument(
         "--method",
         type=str,
         default="sift",
         choices=["sift", "orb"],
-        help="match_frame",
+        help="Feature matching method to use in matcher.py.",
     )
     parser.add_argument(
         "--crop-scale",
         type=float,
         default=0.25,
-        help="Коефіцієнт масштабування кадру дрона перед матчингом.",
+        help="Downscale factor applied to UAV frames before feature matching.",
     )
     parser.add_argument(
         "--use-clahe",
         action="store_true",
-        help="Увімкнути CLAHE-препроцесинг (корисно для відео з екрана).",
+        help="Enable CLAHE contrast normalization (useful for screen-recorded video).",
     )
     parser.add_argument(
         "--stride",
         type=int,
         default=5,
-        help="Крок вибірки кадрів, якщо на вхід подано відео.",
+        help="Frame sampling stride when the input is a video file.",
     )
     parser.add_argument(
         "--no-smooth",
         action="store_true",
-        help="Вимкнути згладжування траєкторії.",
+        help="Disable Savitzky-Golay trajectory smoothing.",
     )
     parser.add_argument(
         "--no-video",
         action="store_true",
-        help="Не рендерити відео із зумом (тільки JSON і картинка).",
+        help="Skip zoomed video rendering (output JSON and static route image only).",
     )
     return parser.parse_args()
 
@@ -77,26 +77,26 @@ def main() -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Завантаження карти
+    # 1. Load satellite map
     map_img = cv2.imread(args.map)
     if map_img is None:
-        raise FileNotFoundError(f"Не вдалося завантажити карту: {args.map}")
-    print(f"[1/4] Карту завантажено: {map_img.shape[1]}x{map_img.shape[0]}")
+        raise FileNotFoundError(f"Failed to load map image: {args.map}")
+    print(f"[1/4] Map loaded: {map_img.shape[1]}x{map_img.shape[0]}")
 
-    # 2. Завантаження кадрів (папка або відео)
+    # 2. Load UAV frames (from directory or video)
     input_path = Path(args.input)
     if input_path.is_dir():
         frames = load_frames_from_dir(input_path)
     elif input_path.is_file():
         frames = load_frames_from_video(input_path, stride=args.stride)
     else:
-        raise FileNotFoundError(f"Вхідний шлях не знайдено: {args.input}")
-    print(f"[2/4] Завантажено кадрів: {len(frames)}")
+        raise FileNotFoundError(f"Input path not found: {args.input}")
+    print(f"[2/4] Loaded frames: {len(frames)}")
 
     if not frames:
-        raise ValueError("Список кадрів порожній.")
+        raise ValueError("Frame list is empty.")
 
-    # 3. Трекінг + постобробка
+    # 3. Run ROI tracking and trajectory post-processing
     matcher_fn = partial(
         match_frame,
         method=args.method,
@@ -107,7 +107,7 @@ def main() -> None:
     raw_trajectory = tracker.track(frames)
 
     valid_raw = sum(1 for r in raw_trajectory if r.valid)
-    print(f"[3/4] Трекінг завершено: {valid_raw}/{len(frames)} валідних кадрів")
+    print(f"[3/4] Tracking complete: {valid_raw}/{len(frames)} valid frames")
 
     final_trajectory = postprocess_trajectory(
         raw_trajectory,
@@ -117,9 +117,9 @@ def main() -> None:
 
     traj_json_path = out_dir / "trajectory.json"
     save_trajectory(final_trajectory, traj_json_path)
-    print(f"      Збережено траєкторію: {traj_json_path}")
+    print(f"      Saved trajectory: {traj_json_path}")
 
-    # 4. Візуалізація
+    # 4. Generate route visualization and optional zoomed video
     route_img_path = out_dir / "route_visualization.png"
     draw_trajectory_on_map(
         map_path=args.map,
@@ -137,7 +137,7 @@ def main() -> None:
             steps_per_segment=10,
         )
 
-    print("[4/4] Готово!")
+    print("[4/4] Done!")
 
 
 if __name__ == "__main__":

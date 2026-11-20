@@ -5,11 +5,8 @@ import cv2
 
 def _natural_sort_key(path: Path):
     """
-    Допоміжна функція для правильного числового сортування.
-    Розбиває назву файлу на шматки: текст залишає як є, а числа перетворює на int.
-    Наприклад, 'frame_10.jpg' -> ['frame_', 10, '.jpg'],
-    а 'frame_2.jpg' -> ['frame_', 2, '.jpg'].
-    Тоді число 2 гарантовано стане перед числом 10.
+    Helper key for natural numerical sorting of filenames.
+    Splits filename into text and integer parts so 'frame_2.jpg' comes before 'frame_10.jpg'.
     """
     parts = re.split(r"(\d+)", path.name)
     return [int(part) if part.isdigit() else part.lower() for part in parts]
@@ -17,17 +14,17 @@ def _natural_sort_key(path: Path):
 
 def load_frames_from_dir(folder_path):
     """
-    Зчитує зображення з папки у правильному числовому порядку.
-    Повертає список кадрів (кожен кадр — це масив пікселів OpenCV).
+    Load images from a directory in natural numerical order.
+    Returns a list of OpenCV BGR frames.
     """
     folder = Path(folder_path)
     if not folder.exists() or not folder.is_dir():
-        raise FileNotFoundError(f"Папку не знайдено: {folder_path}")
+        raise FileNotFoundError(f"Directory not found: {folder_path}")
 
-    # Підтримувані формати фото
+    # Supported image extensions
     extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
-    # Беремо всі файли з потрібним розширенням і сортуємо їх за числами в назві
+    # Collect matching files and sort naturally by embedded numbers
     image_files = [
         p for p in folder.iterdir()
         if p.is_file() and p.suffix.lower() in extensions
@@ -45,19 +42,19 @@ def load_frames_from_dir(folder_path):
 
 def load_frames_from_video(video_path, stride=5):
     """
-    Відкриває відеофайл (.mp4 тощо) і дістає кожен stride-й кадр.
-    Наприклад, при stride=5 візьме кадри з індексами 0, 5, 10, 15...
+    Open a video file and extract every `stride`-th frame.
+    For example, stride=5 extracts frames at indices 0, 5, 10, 15, ...
     """
     if stride < 1:
-        raise ValueError("Параметр stride має бути не меншим за 1")
+        raise ValueError("Parameter 'stride' must be at least 1.")
 
     video_file = Path(video_path)
     if not video_file.exists():
-        raise FileNotFoundError(f"Відеофайл не знайдено: {video_path}")
+        raise FileNotFoundError(f"Video file not found: {video_path}")
 
     cap = cv2.VideoCapture(str(video_file))
     if not cap.isOpened():
-        raise RuntimeError(f"Не вдалося відкрити відео: {video_path}")
+        raise RuntimeError(f"Failed to open video: {video_path}")
 
     frames = []
     frame_index = 0
@@ -65,31 +62,30 @@ def load_frames_from_video(video_path, stride=5):
     try:
         while True:
             ok, frame = cap.read()
-            # Якщо кадрів більше немає — виходимо з циклу
             if not ok:
                 break
 
-            # Беремо лише кожен stride-й кадр
+            # Sample every stride-th frame
             if frame_index % stride == 0:
                 frames.append(frame)
 
             frame_index += 1
     finally:
-        # Обов'язково звільняємо відеофайл після читання
+        # Always release video capture handle
         cap.release()
 
     return frames
 
 
 if __name__ == "__main__":
-    # Приклад швидкої перевірки (підстав свої шляхи, коли з'являться файли)
+    # Quick local sanity check
     test_dir = "test_frames"
     test_video = "test_video.mp4"
 
     if Path(test_dir).exists():
         dir_frames = load_frames_from_dir(test_dir)
-        print(f"Завантажено фото з папки: {len(dir_frames)}")
+        print(f"Loaded images from directory: {len(dir_frames)}")
 
     if Path(test_video).exists():
         vid_frames = load_frames_from_video(test_video, stride=5)
-        print(f"Дістато кадрів із відео (stride=5): {len(vid_frames)}")
+        print(f"Extracted frames from video (stride=5): {len(vid_frames)}")

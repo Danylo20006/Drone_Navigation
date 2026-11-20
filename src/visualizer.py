@@ -5,16 +5,16 @@ import numpy as np
 
 
 def load_trajectory(json_path):
-    """Завантажує список точок траєкторії з JSON-файлу."""
+    """Load the list of trajectory points from a JSON file."""
     path = Path(json_path)
     if not path.exists():
-        raise FileNotFoundError(f"Файл траєкторії не знайдено: {json_path}")
+        raise FileNotFoundError(f"Trajectory file not found: {json_path}")
 
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     if not isinstance(data, list) or len(data) == 0:
-        raise ValueError("Файл траєкторії порожній або має неправильний формат.")
+        raise ValueError("Trajectory file is empty or has an invalid format.")
 
     return data
 
@@ -26,14 +26,14 @@ def draw_trajectory_on_map(
     box_alpha=0.25,
 ):
     """
-    Малює маршрут поверх великої карти:
-    - лінія маршруту та пронумеровані точки;
-    - мітки START (зелений) і FINISH (червоний);
-    - напівпрозорі рамки навколо позицій дрона.
+    Draw the reconstructed route over the satellite map:
+    - trajectory polyline and numbered waypoints;
+    - START (green) and FINISH (red) markers;
+    - semi-transparent projected bounding boxes of UAV frames.
     """
     map_img = cv2.imread(str(map_path))
     if map_img is None:
-        raise FileNotFoundError(f"Не вдалося відкрити карту: {map_path}")
+        raise FileNotFoundError(f"Failed to load map image: {map_path}")
 
     trajectory = load_trajectory(trajectory_path)
 
@@ -42,9 +42,9 @@ def draw_trajectory_on_map(
         if item.get("valid", True) and item.get("center") is not None
     ]
     if len(valid_points) == 0:
-        raise ValueError("У траєкторії немає жодної валідної точки.")
+        raise ValueError("No valid trajectory points found.")
 
-    # 1. Напівпрозорі рамки через overlay + cv2.addWeighted
+    # 1. Draw semi-transparent projected frame footprints
     overlay = map_img.copy()
     for item in valid_points:
         corners = item.get("corners")
@@ -55,7 +55,7 @@ def draw_trajectory_on_map(
 
     cv2.addWeighted(overlay, box_alpha, map_img, 1.0 - box_alpha, 0, dst=map_img)
 
-    # 2. Лінія маршруту між сусідніми точками
+    # 2. Draw route polyline connecting consecutive centers
     centers = [
         (int(round(item["center"][0])), int(round(item["center"][1])))
         for item in valid_points
@@ -63,16 +63,16 @@ def draw_trajectory_on_map(
     for i in range(1, len(centers)):
         cv2.line(map_img, centers[i - 1], centers[i], color=(0, 255, 120), thickness=4)
 
-    # 3. Точки та номери кадрів
+    # 3. Draw waypoints and frame indices
     for idx, (item, (cx, cy)) in enumerate(zip(valid_points, centers)):
         frame_id = item.get("frame_id", idx)
 
         if idx == 0:
-            point_color = (0, 200, 0)      # Зелений для START
+            point_color = (0, 200, 0)      # Green for START
         elif idx == len(centers) - 1:
-            point_color = (0, 0, 230)      # Червоний для FINISH
+            point_color = (0, 0, 230)      # Red for FINISH
         else:
-            point_color = (255, 120, 0)    # Синій/блакитний для проміжних точок
+            point_color = (255, 120, 0)    # Blue for intermediate points
 
         cv2.circle(map_img, (cx, cy), radius=8, color=point_color, thickness=-1)
         cv2.circle(map_img, (cx, cy), radius=8, color=(255, 255, 255), thickness=2)
@@ -88,7 +88,7 @@ def draw_trajectory_on_map(
             lineType=cv2.LINE_AA,
         )
 
-    # 4. Чіткі мітки START і FINISH
+    # 4. Draw START and FINISH labels
     start_x, start_y = centers[0]
     finish_x, finish_y = centers[-1]
 
@@ -116,12 +116,12 @@ def draw_trajectory_on_map(
     out_file = Path(output_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_file), map_img)
-    print(f"Збережено візуалізацію у {out_file}")
+    print(f"Saved route visualization to {out_file}")
     return map_img
 
 
 def _extract_zoom_window(img, center_xy, crop_w=1280, crop_h=720):
-    """Вирізає вікно навколо center_xy з коректною обробкою країв зображення."""
+    """Extract a zoomed crop around `center_xy` with boundary clamping and zero-padding fallback."""
     img_h, img_w = img.shape[:2]
     crop_w = min(crop_w, img_w)
     crop_h = min(crop_h, img_h)
@@ -171,10 +171,10 @@ def render_zoom_video(
     crop_h=720,
     box_alpha=0.25,
 ):
-    """Генерує плавне .mp4 відео з ефектом зуму та поступовим малюванням маршруту."""
+    """Generate a smooth zoomed MP4 video with progressive trajectory rendering."""
     base_map = cv2.imread(str(map_path))
     if base_map is None:
-        raise FileNotFoundError(f"Не вдалося відкрити карту: {map_path}")
+        raise FileNotFoundError(f"Failed to load map image: {map_path}")
 
     trajectory = load_trajectory(trajectory_path)
     valid_points = [
@@ -182,7 +182,7 @@ def render_zoom_video(
         if item.get("valid", True) and item.get("center") is not None
     ]
     if len(valid_points) < 2:
-        raise ValueError("Для відео потрібно щонайменше 2 валідні точки.")
+        raise ValueError("At least 2 valid trajectory points are required to render video.")
 
     centers = [
         (float(item["center"][0]), float(item["center"][1]))
@@ -195,7 +195,7 @@ def render_zoom_video(
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(out_path), fourcc, fps, (crop_w, crop_h))
     if not writer.isOpened():
-        raise RuntimeError(f"Не вдалося відкрити VideoWriter для файлу: {out_path}")
+        raise RuntimeError(f"Failed to open VideoWriter for: {out_path}")
 
     start_x, start_y = int(round(centers[0][0])), int(round(centers[0][1]))
     finish_x, finish_y = int(round(centers[-1][0])), int(round(centers[-1][1]))
@@ -205,6 +205,7 @@ def render_zoom_video(
         p2 = centers[seg_idx + 1]
 
         for s in range(steps_per_segment):
+            # Smoothstep interpolation for fluid camera motion
             raw_t = s / steps_per_segment
             t = raw_t * raw_t * (3.0 - 2.0 * raw_t)
 
@@ -259,6 +260,7 @@ def render_zoom_video(
                     lineType=cv2.LINE_AA,
                 )
 
+            # Current UAV position indicator
             cv2.circle(frame_canvas, seg_curr, radius=10, color=(0, 165, 255), thickness=-1, lineType=cv2.LINE_AA)
             cv2.circle(frame_canvas, seg_curr, radius=10, color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
 
@@ -281,6 +283,7 @@ def render_zoom_video(
             )
             writer.write(zoom_frame)
 
+    # Hold final frame for 1 second with FINISH label
     final_canvas = base_map.copy()
     for k in range(len(centers) - 1):
         pt_a = (int(round(centers[k][0])), int(round(centers[k][1])))
@@ -311,8 +314,9 @@ def render_zoom_video(
         writer.write(final_zoom)
 
     writer.release()
-    print(f"Збережено плавне відео із зумом у {out_path}")
+    print(f"Saved smooth zoomed video to {out_path}")
     return str(out_path)
+
 
 if __name__ == "__main__":
     draw_trajectory_on_map(

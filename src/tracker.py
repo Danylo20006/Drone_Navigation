@@ -5,31 +5,31 @@ from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
-
-from src.schemas import FrameResult, Point2D
 from scipy.signal import savgol_filter
 
-# Тип функції матчингу, яку реалізує Учасник 1:
+from src.schemas import FrameResult, Point2D
+
+# Matcher callable signature:
 # (map_crop, drone_frame) -> (H_matrix_3x3 | None, num_inliers)
 MatcherFn = Callable[[np.ndarray, np.ndarray], Tuple[Optional[np.ndarray], int]]
 
 
 @dataclass
 class TrackerConfig:
-    """Параметри трекінгу та перевірок валідності гомографії."""
-    roi_radius: int = 450              # Базовий радіус вікна пошуку (пікселі карти)
-    min_inliers: int = 12              # Мінімальна кількість inliers від RANSAC
-    max_jump_px: float = 350.0         # Максимальний зсув дрона за 1 кадр (пікселі карти)
-    min_area_ratio: float = 0.005      # Мін. відношення площі проєкції до площі кадру
-    max_area_ratio: float = 20.0       # Макс. відношення площі проєкції до площі кадру
-    expand_factor: float = 1.8         # У скільки разів розширювати ROI при втраті кадру
-    max_lost_before_global: int = 4    # Після скількох пропусків шукати по всій карті
+    """Configuration parameters for ROI tracking and homography sanity checks."""
+    roi_radius: int = 450              # Base ROI search radius (map pixels)
+    min_inliers: int = 12              # Minimum RANSAC/MAGSAC inliers required
+    max_jump_px: float = 350.0         # Maximum allowed displacement per frame (map pixels)
+    min_area_ratio: float = 0.005      # Min ratio of projected area to original frame area
+    max_area_ratio: float = 20.0       # Max ratio of projected area to original frame area
+    expand_factor: float = 1.8         # ROI expansion multiplier per consecutive lost frame
+    max_lost_before_global: int = 4    # Consecutive misses before falling back to full-map search
 
 
 class DroneTracker:
     """
-    Трекінг траєкторії БПЛА по супутниковій карті з використанням
-    локального ROI-пошуку, sanity checks гомографії та ре-локалізації.
+    UAV trajectory tracker over a satellite map using local ROI search,
+    homography sanity checks, and automatic relocalization.
     """
 
     def __init__(
@@ -48,7 +48,7 @@ class DroneTracker:
         center: Point2D,
         radius: int,
     ) -> Tuple[np.ndarray, int, int]:
-        """Вирізає квадратне вікно ROI навколо center з обмеженням по краях карти."""
+        """Extract a square ROI crop around `center`, clamped to map boundaries."""
         cx, cy = int(round(center[0])), int(round(center[1]))
         x1 = max(0, cx - radius)
         y1 = max(0, cy - radius)
@@ -66,8 +66,8 @@ class DroneTracker:
         offset_y: int,
     ) -> Tuple[Point2D, List[Point2D]]:
         """
-        Переносить центр і 4 кути [TL, TR, BR, BL] кадру дрона
-        в глобальну систему координат карти.
+        Project the frame center and 4 corners [TL, TR, BR, BL]
+        into the global satellite map coordinate system.
         """
         h, w = frame_shape
         pts_local = np.array(
@@ -101,36 +101,36 @@ class DroneTracker:
         last_center: Optional[Point2D],
         missed_streak: int,
     ) -> bool:
-        """Перевіряє фізичну адекватність знайденої гомографії."""
+        """Validate physical plausibility of the estimated homography."""
         if H is None or H.shape != (3, 3):
             return False
 
         if inliers < self.cfg.min_inliers:
             return False
 
-        # 1. Визначник 2x2 (відсікає дзеркальні та вироджені проєкції)
+        # 1. Top-left 2x2 determinant (rejects reflections and degenerate projections)
         det = float(H[0, 0] * H[1, 1] - H[0, 1] * H[1, 0])
         if det <= 1e-6:
             return False
 
-        # 2. Центр має лежати в межах карти
+        # 2. Projected center must lie within map bounds
         cx, cy = center
         if not (0.0 <= cx <= self.map_w and 0.0 <= cy <= self.map_h):
             return False
 
-        # 3. Опуклість чотирикутника
+        # 3. Projected quadrilateral must be convex
         quad = np.array(corners, dtype=np.float32)
         if not cv2.isContourConvex(quad):
             return False
 
-        # 4. Адекватність площі проєкції
+        # 4. Projected area must be within plausible scale bounds
         frame_area = float(frame_shape[0] * frame_shape[1])
         proj_area = float(cv2.contourArea(quad))
         area_ratio = proj_area / max(frame_area, 1.0)
         if not (self.cfg.min_area_ratio <= area_ratio <= self.cfg.max_area_ratio):
             return False
 
-        # 5. Обмеження максимального стрибка від попередньої валідної точки
+        # 5. Limit maximum displacement from the last valid position
         if last_center is not None:
             dist = float(np.hypot(cx - last_center[0], cy - last_center[1]))
             allowed_jump = self.cfg.max_jump_px * (missed_streak + 1)
@@ -140,7 +140,7 @@ class DroneTracker:
         return True
 
     def track(self, frames: List[np.ndarray]) -> List[FrameResult]:
-        """Проганяє послідовність кадрів дрона і повертає сиру траєкторію."""
+        """Process a sequence of UAV frames and return the raw trajectory."""
         results: List[FrameResult] = []
         last_valid_center: Optional[Point2D] = None
         missed_streak = 0
@@ -148,7 +148,7 @@ class DroneTracker:
         for idx, frame in enumerate(frames):
             frame_h, frame_w = frame.shape[:2]
 
-            # Визначаємо область пошуку: ROI або вся карта
+            # Select search region: local ROI or full map
             use_roi = (
                 last_valid_center is not None
                 and missed_streak < self.cfg.max_lost_before_global
@@ -160,7 +160,7 @@ class DroneTracker:
             else:
                 search_img, offset_x, offset_y = self.map_img, 0, 0
 
-            # Виклик зовнішнього матчера (Учасник 1)
+            # Run feature matching and homography estimation
             H, inliers = self.matcher_fn(search_img, frame)
 
             is_valid = False
@@ -210,69 +210,70 @@ class DroneTracker:
 
         return results
 
+
 def postprocess_trajectory(
-        results: List[FrameResult],
-        interpolate: bool = True,
-        smooth: bool = True,
-        smooth_window: int = 7,
-        polyorder: int = 2,
-        ) -> List[FrameResult]:
-        """
-        Постобробка сирої траєкторії:
-        1. Лінійна інтерполяція пропущених кадрів між валідними точками.
-        2. Згладжування координат центру фільтром Савицького-Голея.
-        """
-        if not results:
-            return results
+    results: List[FrameResult],
+    interpolate: bool = True,
+    smooth: bool = True,
+    smooth_window: int = 7,
+    polyorder: int = 2,
+) -> List[FrameResult]:
+    """
+    Post-process raw trajectory:
+    1. Linearly interpolate missing frames between valid detections.
+    2. Smooth center coordinates using a Savitzky-Golay filter.
+    """
+    if not results:
+        return results
 
-        # Копіюємо список, щоб не мутувати оригінал
-        processed = [
-            FrameResult(
-                frame_id=r.frame_id,
-                center=r.center,
-                corners=r.corners,
-                inliers=r.inliers,
-                valid=r.valid,
-                interpolated=r.interpolated,
-            )
-            for r in results
-        ]
+    # Deep copy results to avoid mutating the input list
+    processed = [
+        FrameResult(
+            frame_id=r.frame_id,
+            center=r.center,
+            corners=r.corners,
+            inliers=r.inliers,
+            valid=r.valid,
+            interpolated=r.interpolated,
+        )
+        for r in results
+    ]
 
-        valid_indices = [i for i, r in enumerate(processed) if r.valid and r.center is not None]
-        if len(valid_indices) < 2:
-            return processed
-
-        # 1. Лінійна інтерполяція пропусків (тільки всередині діапазону валідних кадрів)
-        if interpolate:
-            known_x = np.array([processed[i].center[0] for i in valid_indices], dtype=np.float64)
-            known_y = np.array([processed[i].center[1] for i in valid_indices], dtype=np.float64)
-            known_idx = np.array(valid_indices, dtype=np.float64)
-
-            first_valid, last_valid = valid_indices[0], valid_indices[-1]
-            for i in range(first_valid, last_valid + 1):
-                if not processed[i].valid or processed[i].center is None:
-                    ix = float(np.interp(i, known_idx, known_x))
-                    iy = float(np.interp(i, known_idx, known_y))
-                    processed[i].center = (ix, iy)
-                    processed[i].corners = None
-                    processed[i].valid = True
-                    processed[i].interpolated = True
-
-        # 2. Згладжування фільтром Савицького-Голея
-        if smooth:
-            active_indices = [i for i, r in enumerate(processed) if r.valid and r.center is not None]
-            n_pts = len(active_indices)
-
-            # Вікно має бути непарним, <= кількості точок і > polyorder
-            win = min(smooth_window, n_pts if n_pts % 2 == 1 else n_pts - 1)
-            if win > polyorder and win >= 3:
-                xs = np.array([processed[i].center[0] for i in active_indices], dtype=np.float64)
-                ys = np.array([processed[i].center[1] for i in active_indices], dtype=np.float64)
-
-                xs_smooth = savgol_filter(xs, window_length=win, polyorder=polyorder)
-                ys_smooth = savgol_filter(ys, window_length=win, polyorder=polyorder)
-
-                for idx, sx, sy in zip(active_indices, xs_smooth, ys_smooth):
-                    processed[idx].center = (float(sx), float(sy))
-
+    valid_indices = [i for i, r in enumerate(processed) if r.valid and r.center is not None]
+    if len(valid_indices) < 2:
         return processed
+
+    # 1. Linear interpolation for gaps within the valid frame range
+    if interpolate:
+        known_x = np.array([processed[i].center[0] for i in valid_indices], dtype=np.float64)
+        known_y = np.array([processed[i].center[1] for i in valid_indices], dtype=np.float64)
+        known_idx = np.array(valid_indices, dtype=np.float64)
+
+        first_valid, last_valid = valid_indices[0], valid_indices[-1]
+        for i in range(first_valid, last_valid + 1):
+            if not processed[i].valid or processed[i].center is None:
+                ix = float(np.interp(i, known_idx, known_x))
+                iy = float(np.interp(i, known_idx, known_y))
+                processed[i].center = (ix, iy)
+                processed[i].corners = None
+                processed[i].valid = True
+                processed[i].interpolated = True
+
+    # 2. Savitzky-Golay trajectory smoothing
+    if smooth:
+        active_indices = [i for i, r in enumerate(processed) if r.valid and r.center is not None]
+        n_pts = len(active_indices)
+
+        # Window length must be odd, <= number of points, and > polyorder
+        win = min(smooth_window, n_pts if n_pts % 2 == 1 else n_pts - 1)
+        if win > polyorder and win >= 3:
+            xs = np.array([processed[i].center[0] for i in active_indices], dtype=np.float64)
+            ys = np.array([processed[i].center[1] for i in active_indices], dtype=np.float64)
+
+            xs_smooth = savgol_filter(xs, window_length=win, polyorder=polyorder)
+            ys_smooth = savgol_filter(ys, window_length=win, polyorder=polyorder)
+
+            for idx, sx, sy in zip(active_indices, xs_smooth, ys_smooth):
+                processed[idx].center = (float(sx), float(sy))
+
+    return processed

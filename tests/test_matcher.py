@@ -52,6 +52,7 @@ def render_verification_figure(
     h_map, w_map = map_rgb.shape[:2]
     warped_rgb = cv2.warpPerspective(frame_rgb, H, (w_map, h_map))
 
+    # Compute padded bounding box around the projected frame footprint
     center = corners.mean(axis=0)
     pad = 80
     x1 = max(0, int(np.floor(corners[:, 0].min())) - pad)
@@ -147,6 +148,7 @@ def run_batch(
             f"avg_time={np.mean(time_list):.1f} ms"
         )
 
+    # Optionally render an overview plot of all matched footprints
     if (save_path is not None or show) and matched_items:
         map_rgb = bgr_to_rgb(map_img)
         fig, ax = plt.subplots(figsize=(14, 7))

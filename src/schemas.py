@@ -11,20 +11,20 @@ Point2D = Tuple[float, float]
 
 @dataclass
 class FrameResult:
-    """Результат локалізації одного кадру дрона на глобальній карті."""
+    """Localization result for a single UAV frame on the global satellite map."""
     frame_id: int
-    center: Optional[Point2D]                # (x, y) у пікселях глобальної карти
-    corners: Optional[List[Point2D]]         # 4 кути кадру [TL, TR, BR, BL] на карті
-    inliers: int                             # Кількість inliers від RANSAC
-    valid: bool                              # True, якщо гомографія пройшла sanity checks
-    interpolated: bool = False               # True, якщо координати відновлено інтерполяцією
+    center: Optional[Point2D]                # (x, y) coordinates in global map pixels
+    corners: Optional[List[Point2D]]         # 4 projected frame corners [TL, TR, BR, BL] on the map
+    inliers: int                             # Number of RANSAC/MAGSAC inliers
+    valid: bool                              # True if homography passed sanity checks
+    interpolated: bool = False               # True if coordinates were recovered via interpolation
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
 def save_trajectory(results: List[FrameResult], output_path: str | Path) -> None:
-    """Зберігає список результатів трекінгу у JSON."""
+    """Save a list of tracking results to a JSON file."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -32,7 +32,7 @@ def save_trajectory(results: List[FrameResult], output_path: str | Path) -> None
 
 
 def load_trajectory(input_path: str | Path) -> List[FrameResult]:
-    """Зчитує траєкторію з JSON (зручно для visualizer.py)."""
+    """Load a trajectory from a JSON file."""
     path = Path(input_path)
     with path.open("r", encoding="utf-8") as f:
         raw = json.load(f)

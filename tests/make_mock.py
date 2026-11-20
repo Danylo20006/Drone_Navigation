@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 def build_mock_trajectory(num_points=14, out_file="mock_trajectory.json"):
+    """Generate a synthetic sinusoidal trajectory JSON for visualization testing."""
     trajectory = []
     box_half_w = 130
     box_half_h = 85
@@ -16,6 +17,7 @@ def build_mock_trajectory(num_points=14, out_file="mock_trajectory.json"):
         cx = int(round(start_x + i * step_x))
         cy = int(round(920 + 420 * math.sin(i * 0.65)))
 
+        # Axis-aligned bounding box corners [TL, TR, BR, BL]
         corners = [
             [cx - box_half_w, cy - box_half_h],
             [cx + box_half_w, cy - box_half_h],
@@ -34,8 +36,8 @@ def build_mock_trajectory(num_points=14, out_file="mock_trajectory.json"):
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(trajectory, f, indent=2)
 
-    print("Збережено у:", out_path)
-    print("Перша точка:", trajectory[0]["center"], "Остання точка:", trajectory[-1]["center"])
+    print("Saved to:", out_path)
+    print("First point:", trajectory[0]["center"], "Last point:", trajectory[-1]["center"])
 
 
 if __name__ == "__main__":
