@@ -165,8 +165,8 @@ def render_zoom_video(
     map_path,
     trajectory_path,
     output_video="trajectory_zoom.mp4",
-    fps=30,
-    steps_per_segment=30,
+    fps=60,
+    steps_per_segment=18,
     crop_w=1280,
     crop_h=720,
     box_alpha=0.25,
@@ -316,13 +316,14 @@ def render_zoom_video(
 
 if __name__ == "__main__":
     draw_trajectory_on_map(
-        map_path="global_map.png",
-        trajectory_path="mock_trajectory.json",
+        map_path="../data/global_map.png",
+        trajectory_path="../data/trajectory.json",  # шлях JSON, коли появиться
         output_path="route_visualization.png",
     )
     render_zoom_video(
-        map_path="global_map.png",
-        trajectory_path="mock_trajectory.json",
+        map_path="../data/global_map.png",
+        trajectory_path="../data/trajectory.json",  # шлях  JSON, коли появиться
         output_video="trajectory_zoom.mp4",
-        fps=4,
+        fps=60,
+        steps_per_segment=18,
     )
