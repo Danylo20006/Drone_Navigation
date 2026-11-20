@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from src.schemas import FrameResult, Point2D
+from scipy.signal import savgol_filter
 
 # Тип функції матчингу, яку реалізує Учасник 1:
 # (map_crop, drone_frame) -> (H_matrix_3x3 | None, num_inliers)
@@ -19,7 +20,7 @@ class TrackerConfig:
     roi_radius: int = 450              # Базовий радіус вікна пошуку (пікселі карти)
     min_inliers: int = 12              # Мінімальна кількість inliers від RANSAC
     max_jump_px: float = 350.0         # Максимальний зсув дрона за 1 кадр (пікселі карти)
-    min_area_ratio: float = 0.05       # Мін. відношення площі проєкції до площі кадру
+    min_area_ratio: float = 0.005      # Мін. відношення площі проєкції до площі кадру
     max_area_ratio: float = 20.0       # Макс. відношення площі проєкції до площі кадру
     expand_factor: float = 1.8         # У скільки разів розширювати ROI при втраті кадру
     max_lost_before_global: int = 4    # Після скількох пропусків шукати по всій карті
@@ -208,3 +209,70 @@ class DroneTracker:
                 )
 
         return results
+
+def postprocess_trajectory(
+        results: List[FrameResult],
+        interpolate: bool = True,
+        smooth: bool = True,
+        smooth_window: int = 7,
+        polyorder: int = 2,
+        ) -> List[FrameResult]:
+        """
+        Постобробка сирої траєкторії:
+        1. Лінійна інтерполяція пропущених кадрів між валідними точками.
+        2. Згладжування координат центру фільтром Савицького-Голея.
+        """
+        if not results:
+            return results
+
+        # Копіюємо список, щоб не мутувати оригінал
+        processed = [
+            FrameResult(
+                frame_id=r.frame_id,
+                center=r.center,
+                corners=r.corners,
+                inliers=r.inliers,
+                valid=r.valid,
+                interpolated=r.interpolated,
+            )
+            for r in results
+        ]
+
+        valid_indices = [i for i, r in enumerate(processed) if r.valid and r.center is not None]
+        if len(valid_indices) < 2:
+            return processed
+
+        # 1. Лінійна інтерполяція пропусків (тільки всередині діапазону валідних кадрів)
+        if interpolate:
+            known_x = np.array([processed[i].center[0] for i in valid_indices], dtype=np.float64)
+            known_y = np.array([processed[i].center[1] for i in valid_indices], dtype=np.float64)
+            known_idx = np.array(valid_indices, dtype=np.float64)
+
+            first_valid, last_valid = valid_indices[0], valid_indices[-1]
+            for i in range(first_valid, last_valid + 1):
+                if not processed[i].valid or processed[i].center is None:
+                    ix = float(np.interp(i, known_idx, known_x))
+                    iy = float(np.interp(i, known_idx, known_y))
+                    processed[i].center = (ix, iy)
+                    processed[i].corners = None
+                    processed[i].valid = True
+                    processed[i].interpolated = True
+
+        # 2. Згладжування фільтром Савицького-Голея
+        if smooth:
+            active_indices = [i for i, r in enumerate(processed) if r.valid and r.center is not None]
+            n_pts = len(active_indices)
+
+            # Вікно має бути непарним, <= кількості точок і > polyorder
+            win = min(smooth_window, n_pts if n_pts % 2 == 1 else n_pts - 1)
+            if win > polyorder and win >= 3:
+                xs = np.array([processed[i].center[0] for i in active_indices], dtype=np.float64)
+                ys = np.array([processed[i].center[1] for i in active_indices], dtype=np.float64)
+
+                xs_smooth = savgol_filter(xs, window_length=win, polyorder=polyorder)
+                ys_smooth = savgol_filter(ys, window_length=win, polyorder=polyorder)
+
+                for idx, sx, sy in zip(active_indices, xs_smooth, ys_smooth):
+                    processed[idx].center = (float(sx), float(sy))
+
+        return processed
