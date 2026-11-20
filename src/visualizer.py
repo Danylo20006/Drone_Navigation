@@ -158,7 +158,7 @@ def _extract_zoom_window(img, center_xy, crop_w=1280, crop_h=720):
         canvas[0:crop.shape[0], 0:crop.shape[1]] = crop
         return canvas
 
-    return crop
+    return np.ascontiguousarray(crop)
 
 
 def render_zoom_video(
